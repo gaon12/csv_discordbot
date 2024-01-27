@@ -3,6 +3,8 @@ import discord
 from discord.ext import commands
 import asyncio
 import logging
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +30,16 @@ async def load_qa_data():
     except Exception as e:
         logging.error(f"QA data file read error: {e}")
         return {}
+
+class FileChangeHandler(FileSystemEventHandler):
+    def __init__(self, bot, filename, callback):
+        self.bot = bot
+        self.filename = filename
+        self.callback = callback
+
+    def on_modified(self, event):
+        if event.src_path == self.filename:
+            asyncio.run_coroutine_threadsafe(self.callback(), self.bot.loop)
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -60,7 +72,20 @@ async def cmdname(ctx, *args):
 async def help_cmd(ctx):
     await ctx.send("Usage: !cmdname [question]")
 
+async def update_qa_data():
+    global qa_data
+    qa_data = await load_qa_data()
+    logging.info("QA data updated.")
+
 if TOKEN:
-    bot.run(TOKEN)
+    event_handler = FileChangeHandler(bot, 'qa_data.csv', update_qa_data)
+    observer = Observer()
+    observer.schedule(event_handler, path='.', recursive=False)
+    observer.start()
+    try:
+        bot.run(TOKEN)
+    finally:
+        observer.stop()
+        observer.join()
 else:
     logging.error("No valid token found.")
