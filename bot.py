@@ -5,6 +5,9 @@ import asyncio
 import logging
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+import openpyxl
+import xlrd
+import os
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -20,15 +23,46 @@ def read_token_from_file(file_path):
 
 TOKEN = read_token_from_file('token.txt')
 
-async def load_qa_data():
+def read_csv_or_tsv(file_path, delimiter=','):
     try:
-        with open('qa_data.csv', mode='r', encoding='utf-8') as f:
-            reader = csv.reader(f, quotechar='"', quoting=csv.QUOTE_ALL)
-            next(reader)
-            qa_data = {row[0]: row[1] for row in reader}
-        return qa_data
+        with open(file_path, mode='r', encoding='utf-8') as f:
+            reader = csv.reader(f, delimiter=delimiter)
+            next(reader)  # 첫 번째 행(헤더) 건너뛰기
+            return {row[0]: row[1] for row in reader}
     except Exception as e:
-        logging.error(f"QA data file read error: {e}")
+        logging.error(f"Error reading CSV/TSV file: {e}")
+        return {}
+
+def read_xls(file_path):
+    try:
+        workbook = xlrd.open_workbook(file_path)
+        sheet = workbook.sheet_by_index(0)
+        return {sheet.cell_value(row, 0): sheet.cell_value(row, 1) for row in range(1, sheet.nrows)}
+    except Exception as e:
+        logging.error(f"Error reading XLS file: {e}")
+        return {}
+
+def read_xlsx(file_path):
+    try:
+        workbook = openpyxl.load_workbook(file_path, data_only=True)
+        sheet = workbook.active
+        return {sheet.cell(row=row, column=1).value: sheet.cell(row=row, column=2).value for row in range(2, sheet.max_row + 1)}
+    except Exception as e:
+        logging.error(f"Error reading XLSX file: {e}")
+        return {}
+
+async def load_qa_data():
+    file_path = 'qa_data'  # 파일 이름(확장자 제외)
+    if os.path.exists(f"{file_path}.tsv"):
+        return read_csv_or_tsv(f"{file_path}.tsv", delimiter='\t')
+    elif os.path.exists(f"{file_path}.xlsx"):
+        return read_xlsx(f"{file_path}.xlsx")
+    elif os.path.exists(f"{file_path}.xls"):
+        return read_xls(f"{file_path}.xls")
+    elif os.path.exists(f"{file_path}.csv"):
+        return read_csv_or_tsv(f"{file_path}.csv")
+    else:
+        logging.error("No suitable QA data file found.")
         return {}
 
 class FileChangeHandler(FileSystemEventHandler):
